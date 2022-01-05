@@ -1,0 +1,62 @@
+esphome:
+  name: utility-bridge
+  comment: Fan controller
+
+esp32:
+  # board: nodemcu-32s
+  board: esp32doit-devkit-v1
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  password: !secret esphome_utility_bridge_api_password
+
+ota:
+  password: !secret esphome_utility_bridge_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  manual_ip:
+    static_ip: 192.168.1.134
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+    dns1: 192.168.1.1
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "utility-bridge Fallback"
+    password: !secret esphome_utility_bridge_ap_password
+
+captive_portal:
+
+# Load external components
+external_components:
+  - source: custom_components
+
+# SPI
+spi:
+  clk_pin: GPIO14
+  mosi_pin: GPIO13
+  miso_pin: GPIO12
+
+nrf905:
+  id: "nrf905_rf"
+  cs_pin: GPIO23
+  am_pin: GPIO32
+  cd_pin: GPIO33
+  ce_pin: GPIO27
+  dr_pin: GPIO35
+  pwr_pin: GPIO26
+  txen_pin: GPIO25
+
+fan:
+  - platform: zehnder
+    name: "Ventilation"
+    nrf905: nrf905_rf
