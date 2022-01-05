@@ -10,8 +10,6 @@ namespace zehnder {
 static const char *TAG = "zehnder";
 
 typedef struct {
-  // uint8_t nrf905_registers[10];                     // nRF905 config registers
-  // uint8_t nrf905_tx_payload[NRF905_MAX_FRAMESIZE];  // nRF905 Tx payload
   uint32_t nrf905_tx_address;  // nRF905 Tx address
   uint32_t fan_network_id;     // Fan (Zehnder/BUVA) network ID
   uint8_t fan_my_device_type;  // Fan (Zehnder/BUVA) device type
@@ -51,24 +49,41 @@ static DiscoveryData discoveryData = {
     .state = DiscoverStateNrOf,
 };
 
-ZehnderRF::ZehnderRF(void) {}
+//  FAN_FRAME_SETVOLTAGE = 0x01,  // Set speed (voltage / percentage)
+//  FAN_FRAME_SETSPEED = 0x02,    // Set speed (preset)
+//  FAN_FRAME_SETTIMER = 0x03,    // Set speed with timer
+//  FAN_NETWORK_JOIN_REQUEST = 0x04,
+//  FAN_FRAME_SETSPEED_REPLY = 0x05,
+//  FAN_NETWORK_JOIN_OPEN = 0x06,
+//  FAN_TYPE_FAN_SETTINGS = 0x07,  // Current settings, sent by fan in reply to 0x01, 0x02, 0x10
+//  FAN_FRAME_0B = 0x0B,
+//  FAN_NETWORK_JOIN_ACK = 0x0C,
+//  // FAN_NETWORK_JOIN_FINISH = 0x0D,
+//  FAN_TYPE_QUERY_NETWORK = 0x0D,
+//  FAN_TYPE_QUERY_DEVICE = 0x10,
+//  FAN_FRAME_SETVOLTAGE_REPLY = 0x1D
 
 typedef struct __attribute__((packed)) {
   uint32_t network_id;
   uint32_t reserved[5];
-} RfPayloadSendAvailableForLinking;
+} RfPayloadNetworkJoinOpen;
 
 typedef struct __attribute__((packed)) {
   uint32_t network_id;
   uint32_t reserved[5];
-} RfPayloadJoin;
+} RfPayloadNetworkJoinRequest;
+
+typedef struct __attribute__((packed)) {
+  uint32_t network_id;
+  uint32_t reserved[5];
+} RfPayloadNetworkJoinAck;
 
 typedef struct __attribute__((packed)) {
   uint8_t speed;
   uint8_t voltage;
   uint8_t timer;
   uint32_t reserved[6];
-} RfPayloadSettings;
+} RfPayloadFanSettings;
 
 typedef struct __attribute__((packed)) {
   uint8_t rx_type;          // 0x00 RX Type
@@ -80,15 +95,18 @@ typedef struct __attribute__((packed)) {
   uint8_t parameter_count;  // 0x06 Number of parameters
 
   union {
-    uint8_t parameters[9];  // 0x07 - 0x0F Depends on command
-    RfPayloadSendAvailableForLinking availableForLinking;
-    RfPayloadJoin join;
-    RfPayloadSettings settings;
+    uint8_t parameters[9];                           // 0x07 - 0x0F Depends on command
+    RfPayloadNetworkJoinRequest networkJoinRequest;  // Command 0x04
+    RfPayloadNetworkJoinOpen networkJoinOpen;        // Command 0x06
+    RfPayloadFanSettings fanSettings;                // Command 0x07
+    RfPayloadNetworkJoinAck networkJoinAck;          // Command 0x0C
   } payload;
 } RfFrame;
 
 static bool linked = false;
 static uint32_t lastQuery = 0;
+
+ZehnderRF::ZehnderRF(void) {}
 
 void ZehnderRF::setup() {
   config.fan_my_device_type = FAN_TYPE_REMOTE_CONTROL;
@@ -126,8 +144,9 @@ void ZehnderRF::setup() {
       if ((pResponse->rx_type = config.fan_my_device_type) && (pResponse->rx_id == config.fan_my_device_id)) {
         switch (pResponse->command) {
           case FAN_TYPE_FAN_SETTINGS:
-            ESP_LOGD(TAG, "Received fan settings; speed=0x%02X voltage=%i timer=%i", pResponse->payload.settings.speed,
-                     pResponse->payload.settings.voltage, pResponse->payload.settings.timer);
+            ESP_LOGD(TAG, "Received fan settings; speed=0x%02X voltage=%i timer=%i",
+                     pResponse->payload.fanSettings.speed, pResponse->payload.fanSettings.voltage,
+                     pResponse->payload.fanSettings.timer);
             break;
 
           default:
@@ -170,22 +189,18 @@ void ZehnderRF::loop() {
     if (millis() - lastQuery > 10000) {
       lastQuery = millis();
 
-      uint8_t payload[FAN_FRAMESIZE] = {FAN_TYPE_MAIN_UNIT,
-                                        config.fan_main_unit_id,
-                                        config.fan_my_device_type,
-                                        config.fan_my_device_id,
-                                        FAN_TTL,
-                                        FAN_TYPE_QUERY_NETWORK,
-                                        0x00,
-                                        0x00,
-                                        0x00,
-                                        0x00,
-                                        0x00,
-                                        0x00,
-                                        0x00,
-                                        0x00,
-                                        0x00,
-                                        0x00};
+      uint8_t payload[FAN_FRAMESIZE];
+      RfFrame *const pFrame = (RfFrame *) payload;
+
+      (void) memset(payload, 0, FAN_FRAMESIZE);
+
+      pFrame->rx_type = config.fan_main_unit_type;
+      pFrame->rx_id = config.fan_main_unit_id;
+      pFrame->tx_type = config.fan_my_device_type;
+      pFrame->tx_id = config.fan_my_device_id;
+      pFrame->ttl = FAN_TTL;
+      pFrame->command = FAN_TYPE_QUERY_NETWORK;
+      pFrame->parameter_count = 0x00;  // No parameters
 
       startTransmit(
           payload, [this]() {}, FAN_TX_RETRIES);
@@ -227,7 +242,7 @@ void ZehnderRF::discoveryStart(const uint8_t deviceId, const uint32_t timeout) {
   pFrame->ttl = FAN_TTL;
   pFrame->command = FAN_NETWORK_JOIN_ACK;
   pFrame->parameter_count = 0x04;
-  pFrame->payload.availableForLinking.network_id = NETWORK_LINK_ID;
+  pFrame->payload.networkJoinAck.network_id = NETWORK_LINK_ID;
 
   // Set mode idle
   this->_rf->setMode(nrf905::Idle);
@@ -247,7 +262,7 @@ void ZehnderRF::discoveryStart(const uint8_t deviceId, const uint32_t timeout) {
 
 void ZehnderRF::discoveryEvent(const DiscoveryEvent eventId, const uint8_t *const pData, const size_t dataLength) {
   nrf905::Config rfConfig;
-  RfFrame *const pFrameRx = (RfFrame *) pData;
+  const RfFrame *const pFrameRx = (RfFrame *) pData;
   RfFrame *const pFrameTx = (RfFrame *) discoveryData.payload;
 
   switch (discoveryData.state) {
@@ -285,7 +300,7 @@ void ZehnderRF::discoveryEvent(const DiscoveryEvent eventId, const uint8_t *cons
             case FAN_NETWORK_JOIN_OPEN:  // Received linking request from main unit
               ESP_LOGD(TAG, "Discovery: Found unit type 0x%02X%s with ID 0x%02X on network 0x%08X", pFrameRx->tx_type,
                        pFrameRx->tx_type == FAN_TYPE_MAIN_UNIT ? " (Main)" : "", pFrameRx->tx_id,
-                       pFrameRx->payload.join.network_id);
+                       pFrameRx->payload.networkJoinOpen.network_id);
 
               discoveryData.timeStart = 0;  // Disable rx timeout detection
 
@@ -293,22 +308,20 @@ void ZehnderRF::discoveryEvent(const DiscoveryEvent eventId, const uint8_t *cons
               pFrameTx->rx_type = FAN_TYPE_MAIN_UNIT;        // Set type to main unit
               pFrameTx->rx_id = pFrameRx->tx_id;             // Set ID to the ID of the main unit
               pFrameTx->command = FAN_NETWORK_JOIN_REQUEST;  // Request to connect to network
+              pFrameTx->parameter_count = 0x04;
               // Request to connect to the received network ID
-              discoveryData.payload[0x07] = (pFrameRx->payload.join.network_id & 0x000000FF);
-              discoveryData.payload[0x08] = (pFrameRx->payload.join.network_id & 0x0000FF00) >> 8;
-              discoveryData.payload[0x09] = (pFrameRx->payload.join.network_id & 0x00FF0000) >> 16;
-              discoveryData.payload[0x0A] = (pFrameRx->payload.join.network_id & 0xFF000000) >> 24;
+              pFrameTx->payload.networkJoinRequest.network_id = pFrameRx->payload.networkJoinOpen.network_id;
 
               // Store for later
               config.fan_main_unit_type = pFrameRx->tx_type;
               config.fan_main_unit_id = pFrameRx->tx_id;
-              config.nrf905_tx_address = pFrameRx->payload.join.network_id;
+              config.nrf905_tx_address = pFrameRx->payload.networkJoinOpen.network_id;
 
               // Update address
               rfConfig = this->_rf->getConfig();
-              rfConfig.rx_address = pFrameRx->payload.join.network_id;
+              rfConfig.rx_address = pFrameRx->payload.networkJoinOpen.network_id;
               this->_rf->updateConfig(&rfConfig, NULL);
-              this->_rf->writeTxAddress(pFrameRx->payload.join.network_id, NULL);
+              this->_rf->writeTxAddress(pFrameRx->payload.networkJoinOpen.network_id, NULL);
 
               // Send response frame
               discoveryData.retries = 4;
@@ -320,7 +333,7 @@ void ZehnderRF::discoveryEvent(const DiscoveryEvent eventId, const uint8_t *cons
 
             default:
               ESP_LOGD(TAG, "Discovery: Received unknown frame type 0x%02X from ID 0x%02X on network 0x%08X",
-                       pFrameRx->command, pFrameRx->tx_id, pFrameRx->payload.join.network_id);
+                       pFrameRx->command, pFrameRx->tx_id, pFrameRx->payload.networkJoinOpen.network_id);
               break;
           }
           break;
@@ -362,12 +375,9 @@ void ZehnderRF::discoveryEvent(const DiscoveryEvent eventId, const uint8_t *cons
 
                 discoveryData.timeStart = 0;  // Disable rx timeout detection
 
-                discoveryData.payload[0x05] = FAN_FRAME_0B;  // 0x0B acknowledgee link successful
-                discoveryData.payload[0x06] = 0x00;          // No parameters
-                discoveryData.payload[0x07] = 0x00;          // Clear rest of payload buffer
-                discoveryData.payload[0x08] = 0x00;
-                discoveryData.payload[0x09] = 0x00;
-                discoveryData.payload[0x0A] = 0x00;
+                discoveryData.command = FAN_FRAME_0B;  // 0x0B acknowledgee link successful
+                discoveryData.parameter_count = 0x00;  // No parameters
+                (void) memset(pFrameTx->payload.parameters, 0, sizeof(pFrameTx->payload.parameters));
 
                 discoveryData.retries = 4;
                 startTransmit(
