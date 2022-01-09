@@ -102,11 +102,11 @@ void nRF905::loop() {
   static bool addrMatch;
   uint8_t buffer[NRF905_MAX_FRAMESIZE];
 
-  if ((start == true) && millis() > 10000) {
+  if ((start == true) && (millis() > 10000)) {
     start = false;
 
     // Test SPI
-    // this->testSpi();
+    this->testSpi();
   }
 
   // bool _drNew = this->_gpio_pin_dr->digital_read();
@@ -119,7 +119,7 @@ void nRF905::loop() {
 
       // Read data
       this->readRxPayload(buffer, NRF905_MAX_FRAMESIZE);
-      ESP_LOGD(TAG, "RX Complete: %s", nRF905_HexArrayToStr(buffer, NRF905_MAX_FRAMESIZE));
+      ESP_LOGV(TAG, "RX Complete: %s", nRF905_HexArrayToStr(buffer, NRF905_MAX_FRAMESIZE));
 
       if (this->onRxComplete != NULL) {
         this->onRxComplete(buffer, NRF905_MAX_FRAMESIZE);
@@ -261,7 +261,7 @@ void nRF905::writeConfigRegisters(uint8_t *const pStatus) {
       ESP_LOGE(TAG, "Config write failed");
       //     result = UtilCcFailure;
     } else {
-      ESP_LOGD(TAG, "Write config OK");
+      ESP_LOGV(TAG, "Write config OK");
     }
   }
 #endif

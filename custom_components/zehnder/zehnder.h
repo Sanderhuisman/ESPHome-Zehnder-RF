@@ -6,6 +6,7 @@
 #include "esphome/components/spi/spi.h"
 #include "esphome/components/fan/fan_state.h"
 #include "esphome/components/nrf905/nRF905.h"
+// #include "esphome/core/preferences.h"
 
 namespace esphome {
 namespace zehnder {
@@ -50,35 +51,35 @@ enum {
   FAN_SPEED_MAX = 0x04
 };  // Max:    100% or 10.0 volt
 
-/* Internal result codes */
-enum {
-  FAN_RESULT_SUCCESS = 0x00,  // Success
-  FAN_ERROR_NOT_FOUND,        // Remote device not found
-  FAN_ERROR_NOT_COMPLETED,    // Join operation wasn't completed
-  FAN_ERROR_TX_FAILED,        // Transmission failed
-  FAN_ERROR_NO_REPLY,         // Remote device did not reply
-  FAN_ERROR_NO_ACKNOWLEDGE,   // Remote device did not acknowledge
-  FAN_ERROR_CONFIG_FAILED = 0xFF
-};  // Failed to store nRF905 configuration
-
-/* nRF905 configuration profiles */
-enum {
-  FAN_PROFILE_NOT_CONFIGURED = 0x00,  // nRF905 is not configured
-  FAN_PROFILE_ZEHNDER,                // nRF905 configured for Zehnder fans
-  FAN_PROFILE_BUVA,                   // nRF905 configured for BUVA fans
-  FAN_PROFILE_DEFAULT,                // nRF905 configured with factory default settings
-  FAN_PROFILE_CUSTOM
-};  // nRF905 configured with custom settings
-
 #define NETWORK_LINK_ID 0xA55A5AA5
-const uint32_t network_default_id = 0xE7E7E7E7;
-const uint32_t FAN_JOIN_DEFAULT_TIMEOUT = 10000;
+#define NETWORK_DEFAULT_ID 0xE7E7E7E7
+#define FAN_JOIN_DEFAULT_TIMEOUT 10000
+
+typedef enum { ResultOk, ResultBusy, ResultFailure } Result;
+
+// struct ZehnderRFConfig {
+//   uint32_t nrf905_tx_address;  // nRF905 Tx address
+//   uint32_t fan_network_id;     // Fan (Zehnder/BUVA) network ID
+//   uint8_t fan_my_device_type;  // Fan (Zehnder/BUVA) device type
+//   uint8_t fan_my_device_id;    // Fan (Zehnder/BUVA) device ID
+//   uint8_t fan_main_unit_type;  // Fan (Zehnder/BUVA) main unit type
+//   uint8_t fan_main_unit_id;    // Fan (Zehnder/BUVA) main unit ID
+// } PACKED;
 
 typedef enum {
-  DiscoveryEventLoop,        //
-  DiscoveryEventRxComplete,  //
-  DiscoveryEventNrOf         //
-} DiscoveryEvent;
+  StateStartup,
+  StateStartDiscovery,
+  StateDiscoveryWaitForLinkRequest,
+  StateDiscoveryWaitForJoinResponse,
+  StateDiscoveryJoinComplete,
+
+  StateIdle,
+  StateWaitQueryResponse,
+  StateWaitSetSpeedResponse,
+  StateWaitSetSpeedConfirm,
+
+  StateNrOf  // Keep last
+} State;
 
 class ZehnderRF : public fan::FanState {
  public:
@@ -89,21 +90,37 @@ class ZehnderRF : public fan::FanState {
   void dump_config() override;
   void loop() override;
 
-  int get_speed_count() { return 3; }
+  int get_speed_count() { return 4; }
 
   float get_setup_priority() const override { return setup_priority::DATA; }
 
-  void set_rf(nrf905::nRF905 *const pRf) { _rf = pRf; }
+  void set_rf(nrf905::nRF905 *const pRf) { rf_ = pRf; }
+
+  void set_update_interval(const uint32_t interval) { interval_ = interval; }
 
  protected:
-  void discoveryStart(const uint8_t device_id, const uint32_t timeout);
-  void discoveryEvent(const DiscoveryEvent eventId, const uint8_t *const pData = NULL, const size_t dataLength = 0);
+  void queryDevice(void);
+  void setSpeed(const uint8_t speed, const uint8_t timer = 0);
 
-  void startTransmit(const uint8_t *const pData, const std::function<void(void)> callback, const size_t retries);
   uint8_t createDeviceID(void);
+  void discoveryStart(const uint8_t deviceId);
+
+  Result startTransmit(const uint8_t *const pData, const int8_t rxRetries = -1,
+                       const std::function<void(void)> callback = NULL);
+  void rfComplete(void);
+  void rfHandler(void);
+  void rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength);
+
+  State state_{StateStartup};
 
   bool next_update_{true};
-  nrf905::nRF905 *_rf;
+  nrf905::nRF905 *rf_;
+  uint32_t interval_;
+
+  uint8_t _txFrame[FAN_FRAMESIZE];
+
+  // ESPPreferenceObject pref_;
+  // ZehnderRFConfig config_;
 };
 
 }  // namespace zehnder

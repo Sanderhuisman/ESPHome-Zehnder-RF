@@ -84,7 +84,7 @@ typedef struct {
 } Buffer;
 
 typedef std::function<void(void)> TxReadyCalllback;
-typedef std::function<void(uint8_t *pBuffer, const uint8_t size)> RxCompleteCallback;
+typedef std::function<void(const uint8_t *const pBuffer, const uint8_t size)> RxCompleteCallback;
 
 class nRF905 : public Component,
                public spi::SPIDevice<spi::BIT_ORDER_MSB_FIRST, spi::CLOCK_POLARITY_LOW, spi::CLOCK_PHASE_LEADING,

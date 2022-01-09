@@ -60,3 +60,4 @@ fan:
   - platform: zehnder
     name: "Ventilation"
     nrf905: nrf905_rf
+    update_interval: "60s"
