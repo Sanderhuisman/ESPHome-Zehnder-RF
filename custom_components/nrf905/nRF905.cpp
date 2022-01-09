@@ -3,6 +3,8 @@
 
 #include <string.h>
 
+#define CHECK_REG_WRITE true
+
 namespace esphome {
 namespace nrf905 {
 
@@ -13,7 +15,6 @@ nRF905::nRF905(void) {}
 void nRF905::setup() {
   Config config;
 
-  // ESP_LOGCONFIG(TAG, "nRF905 '%s':", this->get_name().c_str());
   ESP_LOGD(TAG, "Start nRF905 init");
 
   this->spi_setup();
@@ -228,7 +229,7 @@ void nRF905::readConfigRegisters(uint8_t *const pStatus) {
 void nRF905::writeConfigRegisters(uint8_t *const pStatus) {
   Mode mode;
   ConfigBuffer buffer;
-#if 1
+#if CHECK_REG_WRITE
   uint8_t writeData[NRF905_REGISTER_COUNT];
 #endif
 
@@ -242,13 +243,13 @@ void nRF905::writeConfigRegisters(uint8_t *const pStatus) {
   this->encodeConfigRegisters(&this->_config, &buffer);
 
   ESP_LOGV(TAG, "Write config data: %s", nRF905_HexArrayToStr(buffer.data, NRF905_REGISTER_COUNT));
-#if 1
+#if CHECK_REG_WRITE
   (void) memcpy(writeData, buffer.data, NRF905_REGISTER_COUNT);
 #endif
 
   this->spiTransfer((uint8_t *) &buffer, sizeof(ConfigBuffer));
 
-#if 1
+#if CHECK_REG_WRITE
   // Check config write by reading config back and compare
   {
     ConfigBuffer bufferRead;

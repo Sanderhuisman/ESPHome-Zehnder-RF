@@ -25,31 +25,6 @@ static int8_t retries = -1;
 
 static uint32_t lastFanQuery = 0;
 
-// typedef enum {
-//   DiscoverStateStart,                //
-//   DiscoverStateWaitForLinkRequest,   //
-//   DiscoverStateWaitForJoinResponse,  //
-//   DiscoverStateJoinComplete,         //
-//   DiscoverStateNrOf                  // Keep last
-// } DiscoverState;
-
-// typedef struct {
-//   DiscoverState state;
-//   // Payload
-//   uint8_t payload[FAN_FRAMESIZE];
-//   uint32_t timeStart;
-//   int8_t retries;
-
-//   // Discovery config
-//   uint8_t deviceId;
-//   uint8_t deviceType;
-//   uint32_t networkId;
-// } DiscoveryData;
-
-// static DiscoveryData discoveryData = {
-//     // .state = DiscoverStateNrOf,
-// };
-
 static std::function<void(void)> onReceiveTimeout = NULL;
 
 typedef struct __attribute__((packed)) {
@@ -496,12 +471,6 @@ void ZehnderRF::setSpeed(const uint8_t speed, const uint8_t timer) {
 
   this->state_ = StateWaitSetSpeedResponse;
 }
-
-// void ZehnderRF::updateSpeed(const uint8_t speed) {
-//   // auto call = this->make_call();
-//   // call.set_state(speed);
-//   // call.perform();
-// }
 
 void ZehnderRF::discoveryStart(const uint8_t deviceId) {
   RfFrame *const pFrame = (RfFrame *) this->_txFrame;  // frame helper
