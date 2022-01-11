@@ -81,22 +81,27 @@ typedef enum {
   StateNrOf  // Keep last
 } State;
 
-class ZehnderRF : public fan::FanState {
+class ZehnderRF : public Component, public fan::Fan {
  public:
   ZehnderRF();
 
   void setup() override;
 
-  void dump_config() override;
-  void loop() override;
-
-  int get_speed_count() { return 4; }
-
-  float get_setup_priority() const override { return setup_priority::DATA; }
-
+  // Setup things
   void set_rf(nrf905::nRF905 *const pRf) { rf_ = pRf; }
 
   void set_update_interval(const uint32_t interval) { interval_ = interval; }
+
+  void dump_config() override;
+
+  fan::FanTraits get_traits() override;
+  int get_speed_count() { return this->speed_count_; }
+
+  void loop() override;
+
+  void control(const fan::FanCall &call) override;
+
+  float get_setup_priority() const override { return setup_priority::DATA; }
 
  protected:
   void queryDevice(void);
@@ -112,8 +117,8 @@ class ZehnderRF : public fan::FanState {
   void rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength);
 
   State state_{StateStartup};
+  int speed_count_{};
 
-  bool next_update_{true};
   nrf905::nRF905 *rf_;
   uint32_t interval_;
 

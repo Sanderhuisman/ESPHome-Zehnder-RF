@@ -87,6 +87,33 @@ static uint32_t lastQuery = 0;
 
 ZehnderRF::ZehnderRF(void) {}
 
+fan::FanTraits ZehnderRF::get_traits() { return fan::FanTraits(false, true, false, this->speed_count_); }
+
+void ZehnderRF::control(const fan::FanCall &call) {
+  if (call.get_state().has_value()) {
+    this->state = *call.get_state();
+    ESP_LOGD(TAG, "Control has state: %u", this->state);
+  }
+  if (call.get_speed().has_value()) {
+    this->speed = *call.get_speed();
+    ESP_LOGD(TAG, "Control has speed: %u", this->speed);
+  }
+
+  switch (this->state_) {
+    case StateIdle:
+      // Set speed
+      this->setSpeed(this->state ? this->speed : 0x00, 0);
+
+      lastFanQuery = millis();  // Update time
+      break;
+
+    default:
+      break;
+  }
+
+  this->publish_state();
+}
+
 void ZehnderRF::setup() {
   config.fan_networkId = 0x89816EA9;
   config.fan_my_device_type = FAN_TYPE_REMOTE_CONTROL;
@@ -96,15 +123,7 @@ void ZehnderRF::setup() {
 
   ESP_LOGCONFIG(TAG, "ZEHNDER '%s':", this->get_name().c_str());
 
-  fan::FanTraits traits = fan::FanTraits(false, true, false, 3);
-  traits.set_speed(true);
-  traits.set_supported_speed_count(4);
-  this->set_traits(traits);
-
-  this->add_on_state_callback([this]() {
-    ESP_LOGV(TAG, "Something changed");
-    this->next_update_ = true;
-  });
+  this->speed_count_ = 4;
 
   this->rf_->setOnTxReady([this](void) {
     ESP_LOGD(TAG, "Tx Ready");
@@ -162,19 +181,7 @@ void ZehnderRF::loop(void) {
       break;
 
     case StateIdle:
-      if (this->next_update_ == true) {
-        this->next_update_ = false;
-        // Something changed
-
-        this->state = true;
-        this->speed = this->speed > 0 ? this->speed : 0x01;
-
-        // Set speed
-        this->setSpeed(this->state ? this->speed : 0x00, 0);
-
-        //
-        lastFanQuery = millis();  // Update time
-      } else if ((millis() - lastFanQuery) > this->interval_) {
+      if ((millis() - lastFanQuery) > this->interval_) {
         lastFanQuery = millis();  // Update time
         this->queryDevice();
       }
@@ -323,6 +330,10 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
                      pResponse->payload.fanSettings.timer);
 
             this->rfComplete();
+
+            this->state = pResponse->payload.fanSettings.speed > 0;
+            this->speed = pResponse->payload.fanSettings.speed;
+            this->publish_state();
 
             this->state_ = StateIdle;
             break;
