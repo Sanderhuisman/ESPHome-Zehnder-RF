@@ -6,7 +6,6 @@
 #include "esphome/components/spi/spi.h"
 #include "esphome/components/fan/fan_state.h"
 #include "esphome/components/nrf905/nRF905.h"
-// #include "esphome/core/preferences.h"
 
 namespace esphome {
 namespace zehnder {
@@ -56,15 +55,6 @@ enum {
 #define FAN_JOIN_DEFAULT_TIMEOUT 10000
 
 typedef enum { ResultOk, ResultBusy, ResultFailure } Result;
-
-// struct ZehnderRFConfig {
-//   uint32_t nrf905_tx_address;  // nRF905 Tx address
-//   uint32_t fan_network_id;     // Fan (Zehnder/BUVA) network ID
-//   uint8_t fan_my_device_type;  // Fan (Zehnder/BUVA) device type
-//   uint8_t fan_my_device_id;    // Fan (Zehnder/BUVA) device ID
-//   uint8_t fan_main_unit_type;  // Fan (Zehnder/BUVA) main unit type
-//   uint8_t fan_main_unit_id;    // Fan (Zehnder/BUVA) main unit ID
-// } PACKED;
 
 typedef enum {
   StateStartup,
