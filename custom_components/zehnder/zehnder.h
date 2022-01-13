@@ -124,8 +124,7 @@ class ZehnderRF : public Component, public fan::Fan {
 
   uint8_t _txFrame[FAN_FRAMESIZE];
 
-  // ESPPreferenceObject pref_;
-  // ZehnderRFConfig config_;
+  ESPPreferenceObject pref_;
 };
 
 }  // namespace zehnder

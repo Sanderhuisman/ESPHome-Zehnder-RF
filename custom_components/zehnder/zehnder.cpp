@@ -15,9 +15,9 @@ typedef struct {
   uint8_t fan_my_device_id;    // Fan (Zehnder/BUVA) device ID
   uint8_t fan_main_unit_type;  // Fan (Zehnder/BUVA) main unit type
   uint8_t fan_main_unit_id;    // Fan (Zehnder/BUVA) main unit ID
-} NVRAMBuffer;
+} NetworkConfig;
 
-static NVRAMBuffer config;
+static NetworkConfig config;
 
 static uint32_t msgSendTime = 0;
 static uint32_t airwayFreeWaitTime = 0;
@@ -115,11 +115,14 @@ void ZehnderRF::control(const fan::FanCall &call) {
 }
 
 void ZehnderRF::setup() {
-  config.fan_networkId = 0x89816EA9;
-  config.fan_my_device_type = FAN_TYPE_REMOTE_CONTROL;
-  config.fan_my_device_id = 0x04;
-  config.fan_main_unit_type = FAN_TYPE_MAIN_UNIT;
-  config.fan_main_unit_id = 0X1D;
+  // Clear config
+  memset(&config, 0, sizeof(NetworkConfig));
+
+  uint32_t hash = fnv1_hash("zehnderrf");
+  this->pref_ = global_preferences->make_preference<NetworkConfig>(hash, true);
+  if (this->pref_.load(&config)) {
+    ESP_LOGD(TAG, "Config load ok");
+  }
 
   ESP_LOGCONFIG(TAG, "ZEHNDER '%s':", this->get_name().c_str());
 
@@ -154,6 +157,9 @@ void ZehnderRF::dump_config(void) {
 }
 
 void ZehnderRF::loop(void) {
+  uint8_t deviceId;
+  nrf905::Config rfConfig;
+
   // Run RF handler
   this->rfHandler();
 
@@ -161,23 +167,30 @@ void ZehnderRF::loop(void) {
     case StateStartup:
       // Wait until started up
       if (millis() > 15000) {
-        // Discovery
-        this->state_ = StateStartDiscovery;
+        // Discovery?
+        if ((config.fan_networkId == 0x00000000) || (config.fan_my_device_type == 0) ||
+            (config.fan_my_device_id == 0) || (config.fan_main_unit_type == 0) || (config.fan_main_unit_id == 0)) {
+          ESP_LOGD(TAG, "Invalid config, start paring");
+
+          this->state_ = StateStartDiscovery;
+        } else {
+          ESP_LOGD(TAG, "Config data valid, start polling");
+
+          rfConfig = this->rf_->getConfig();
+          rfConfig.rx_address = config.fan_networkId;
+          this->rf_->updateConfig(&rfConfig);
+          this->rf_->writeTxAddress(config.fan_networkId);
+
+          this->state_ = StateIdle;
+        }
       }
       break;
 
     case StateStartDiscovery:
-      // uint8_t deviceId = this->createDeviceID();
-      // this->discoveryStart(deviceId, FAN_JOIN_DEFAULT_TIMEOUT);
+      deviceId = this->createDeviceID();
+      this->discoveryStart(deviceId);
 
       // For now just set TX
-      nrf905::Config rfConfig;
-      rfConfig = this->rf_->getConfig();
-      rfConfig.rx_address = config.fan_networkId;
-      this->rf_->updateConfig(&rfConfig);
-      this->rf_->writeTxAddress(config.fan_networkId);
-
-      this->state_ = StateIdle;
       break;
 
     case StateIdle:
@@ -305,6 +318,9 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
             ESP_LOGD(TAG, "Discovery: received network join success 0x0D");
 
             this->rfComplete();
+
+            ESP_LOGD(TAG, "Saving pairing config");
+            this->pref_.save(&config);
 
             this->state_ = StateIdle;
           } else {
