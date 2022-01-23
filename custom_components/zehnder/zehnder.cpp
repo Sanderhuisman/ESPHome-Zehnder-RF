@@ -7,25 +7,7 @@ namespace zehnder {
 
 #define MAX_TRANSMIT_TIME 2000
 
-static const char *TAG = "zehnder";
-
-typedef struct {
-  uint32_t fan_networkId;      // Fan (Zehnder/BUVA) network ID
-  uint8_t fan_my_device_type;  // Fan (Zehnder/BUVA) device type
-  uint8_t fan_my_device_id;    // Fan (Zehnder/BUVA) device ID
-  uint8_t fan_main_unit_type;  // Fan (Zehnder/BUVA) main unit type
-  uint8_t fan_main_unit_id;    // Fan (Zehnder/BUVA) main unit ID
-} NetworkConfig;
-
-static NetworkConfig config;
-
-static uint32_t msgSendTime = 0;
-static uint32_t airwayFreeWaitTime = 0;
-static int8_t retries = -1;
-
-static uint32_t lastFanQuery = 0;
-
-static std::function<void(void)> onReceiveTimeout = NULL;
+static const char *const TAG = "zehnder";
 
 typedef struct __attribute__((packed)) {
   uint32_t networkId;
@@ -74,17 +56,6 @@ typedef struct __attribute__((packed)) {
   } payload;
 } RfFrame;
 
-typedef enum {
-  RfStateIdle,            // Idle state
-  RfStateWaitAirwayFree,  // wait for airway free
-  RfStateTxBusy,          //
-  RfStateRxWait,
-} RfState;
-
-static RfState rfState = RfStateIdle;
-
-static uint32_t lastQuery = 0;
-
 ZehnderRF::ZehnderRF(void) {}
 
 fan::FanTraits ZehnderRF::get_traits() { return fan::FanTraits(false, true, false, this->speed_count_); }
@@ -104,7 +75,7 @@ void ZehnderRF::control(const fan::FanCall &call) {
       // Set speed
       this->setSpeed(this->state ? this->speed : 0x00, 0);
 
-      lastFanQuery = millis();  // Update time
+      this->lastFanQuery_ = millis();  // Update time
       break;
 
     default:
@@ -116,11 +87,11 @@ void ZehnderRF::control(const fan::FanCall &call) {
 
 void ZehnderRF::setup() {
   // Clear config
-  memset(&config, 0, sizeof(NetworkConfig));
+  memset(&this->config_, 0, sizeof(Config));
 
   uint32_t hash = fnv1_hash("zehnderrf");
-  this->pref_ = global_preferences->make_preference<NetworkConfig>(hash, true);
-  if (this->pref_.load(&config)) {
+  this->pref_ = global_preferences->make_preference<Config>(hash, true);
+  if (this->pref_.load(&this->config_)) {
     ESP_LOGD(TAG, "Config load ok");
   }
 
@@ -130,12 +101,12 @@ void ZehnderRF::setup() {
 
   this->rf_->setOnTxReady([this](void) {
     ESP_LOGD(TAG, "Tx Ready");
-    if (rfState == RfStateTxBusy) {
-      if (retries >= 0) {
-        msgSendTime = millis();
-        rfState = RfStateRxWait;
+    if (this->rfState_ == RfStateTxBusy) {
+      if (this->retries_ >= 0) {
+        this->msgSendTime_ = millis();
+        this->rfState_ = RfStateRxWait;
       } else {
-        rfState = RfStateIdle;
+        this->rfState_ = RfStateIdle;
       }
     }
   });
@@ -149,11 +120,11 @@ void ZehnderRF::setup() {
 void ZehnderRF::dump_config(void) {
   ESP_LOGCONFIG(TAG, "Zehnder Fan config:");
   ESP_LOGCONFIG(TAG, "  Polling interval   %u", this->interval_);
-  ESP_LOGCONFIG(TAG, "  Fan networkId      0x%08X", config.fan_networkId);
-  ESP_LOGCONFIG(TAG, "  Fan my device type 0x%02X", config.fan_my_device_type);
-  ESP_LOGCONFIG(TAG, "  Fan my device id   0x%02X", config.fan_my_device_id);
-  ESP_LOGCONFIG(TAG, "  Fan main_unit type 0x%02X", config.fan_main_unit_type);
-  ESP_LOGCONFIG(TAG, "  Fan main unit id   0x%02X", config.fan_main_unit_id);
+  ESP_LOGCONFIG(TAG, "  Fan networkId      0x%08X", this->config_.fan_networkId);
+  ESP_LOGCONFIG(TAG, "  Fan my device type 0x%02X", this->config_.fan_my_device_type);
+  ESP_LOGCONFIG(TAG, "  Fan my device id   0x%02X", this->config_.fan_my_device_id);
+  ESP_LOGCONFIG(TAG, "  Fan main_unit type 0x%02X", this->config_.fan_main_unit_type);
+  ESP_LOGCONFIG(TAG, "  Fan main unit id   0x%02X", this->config_.fan_main_unit_id);
 }
 
 void ZehnderRF::loop(void) {
@@ -168,8 +139,9 @@ void ZehnderRF::loop(void) {
       // Wait until started up
       if (millis() > 15000) {
         // Discovery?
-        if ((config.fan_networkId == 0x00000000) || (config.fan_my_device_type == 0) ||
-            (config.fan_my_device_id == 0) || (config.fan_main_unit_type == 0) || (config.fan_main_unit_id == 0)) {
+        if ((this->config_.fan_networkId == 0x00000000) || (this->config_.fan_my_device_type == 0) ||
+            (this->config_.fan_my_device_id == 0) || (this->config_.fan_main_unit_type == 0) ||
+            (this->config_.fan_main_unit_id == 0)) {
           ESP_LOGD(TAG, "Invalid config, start paring");
 
           this->state_ = StateStartDiscovery;
@@ -177,11 +149,12 @@ void ZehnderRF::loop(void) {
           ESP_LOGD(TAG, "Config data valid, start polling");
 
           rfConfig = this->rf_->getConfig();
-          rfConfig.rx_address = config.fan_networkId;
+          rfConfig.rx_address = this->config_.fan_networkId;
           this->rf_->updateConfig(&rfConfig);
-          this->rf_->writeTxAddress(config.fan_networkId);
+          this->rf_->writeTxAddress(this->config_.fan_networkId);
 
-          this->state_ = StateIdle;
+          // Start with query
+          this->queryDevice();
         }
       }
       break;
@@ -194,14 +167,13 @@ void ZehnderRF::loop(void) {
       break;
 
     case StateIdle:
-      if ((millis() - lastFanQuery) > this->interval_) {
-        lastFanQuery = millis();  // Update time
+      if ((millis() - this->lastFanQuery_) > this->interval_) {
         this->queryDevice();
       }
       break;
 
     case StateWaitSetSpeedConfirm:
-      if (rfState == RfStateIdle) {
+      if (this->rfState_ == RfStateIdle) {
         // When done, return to idle
         this->state_ = StateIdle;
       }
@@ -233,8 +205,8 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
           // Found a main unit, so send a join request
           pTxFrame->rx_type = FAN_TYPE_MAIN_UNIT;  // Set type to main unit
           pTxFrame->rx_id = pResponse->tx_id;      // Set ID to the ID of the main unit
-          pTxFrame->tx_type = config.fan_my_device_type;
-          pTxFrame->tx_id = config.fan_my_device_id;
+          pTxFrame->tx_type = this->config_.fan_my_device_type;
+          pTxFrame->tx_id = this->config_.fan_my_device_id;
           pTxFrame->ttl = FAN_TTL;
           pTxFrame->command = FAN_NETWORK_JOIN_REQUEST;  // Request to connect to network
           pTxFrame->parameter_count = sizeof(RfPayloadNetworkJoinOpen);
@@ -242,9 +214,9 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
           pTxFrame->payload.networkJoinRequest.networkId = pResponse->payload.networkJoinOpen.networkId;
 
           // Store for later
-          config.fan_networkId = pResponse->payload.networkJoinOpen.networkId;
-          config.fan_main_unit_type = pResponse->tx_type;
-          config.fan_main_unit_id = pResponse->tx_id;
+          this->config_.fan_networkId = pResponse->payload.networkJoinOpen.networkId;
+          this->config_.fan_main_unit_type = pResponse->tx_type;
+          this->config_.fan_main_unit_id = pResponse->tx_id;
 
           // Update address
           rfConfig = this->rf_->getConfig();
@@ -272,10 +244,12 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       ESP_LOGD(TAG, "DiscoverStateWaitForJoinResponse");
       switch (pResponse->command) {
         case FAN_FRAME_0B:
-          if ((pResponse->rx_type == config.fan_my_device_type) && (pResponse->rx_id == config.fan_my_device_id) &&
-              (pResponse->tx_type == config.fan_main_unit_type) && (pResponse->tx_id == config.fan_main_unit_id)) {
+          if ((pResponse->rx_type == this->config_.fan_my_device_type) &&
+              (pResponse->rx_id == this->config_.fan_my_device_id) &&
+              (pResponse->tx_type == this->config_.fan_main_unit_type) &&
+              (pResponse->tx_id == this->config_.fan_main_unit_id)) {
             ESP_LOGD(TAG, "Discovery: Link successful to unit with ID 0x%02X on network 0x%08X", pResponse->tx_id,
-                     config.fan_networkId);
+                     this->config_.fan_networkId);
 
             this->rfComplete();
 
@@ -283,8 +257,8 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
 
             pTxFrame->rx_type = FAN_TYPE_MAIN_UNIT;  // Set type to main unit
             pTxFrame->rx_id = pResponse->tx_id;      // Set ID to the ID of the main unit
-            pTxFrame->tx_type = config.fan_my_device_type;
-            pTxFrame->tx_id = config.fan_my_device_id;
+            pTxFrame->tx_type = this->config_.fan_my_device_type;
+            pTxFrame->tx_id = this->config_.fan_my_device_id;
             pTxFrame->ttl = FAN_TTL;
             pTxFrame->command = FAN_FRAME_0B;  // 0x0B acknowledgee link successful
             pTxFrame->parameter_count = 0x00;  // No parameters
@@ -298,7 +272,7 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
             this->state_ = StateDiscoveryJoinComplete;
           } else {
             ESP_LOGE(TAG, "Discovery: Received unknown link succes from ID 0x%02X on network 0x%08X", pResponse->tx_id,
-                     config.fan_networkId);
+                     this->config_.fan_networkId);
           }
           break;
 
@@ -313,14 +287,16 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       ESP_LOGD(TAG, "StateDiscoveryJoinComplete");
       switch (pResponse->command) {
         case FAN_TYPE_QUERY_NETWORK:
-          if ((pResponse->rx_type == config.fan_main_unit_type) && (pResponse->rx_id == config.fan_main_unit_id) &&
-              (pResponse->tx_type == config.fan_main_unit_type) && (pResponse->tx_id == config.fan_main_unit_id)) {
+          if ((pResponse->rx_type == this->config_.fan_main_unit_type) &&
+              (pResponse->rx_id == this->config_.fan_main_unit_id) &&
+              (pResponse->tx_type == this->config_.fan_main_unit_type) &&
+              (pResponse->tx_id == this->config_.fan_main_unit_id)) {
             ESP_LOGD(TAG, "Discovery: received network join success 0x0D");
 
             this->rfComplete();
 
             ESP_LOGD(TAG, "Saving pairing config");
-            this->pref_.save(&config);
+            this->pref_.save(&this->config_);
 
             this->state_ = StateIdle;
           } else {
@@ -331,14 +307,14 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
 
         default:
           ESP_LOGE(TAG, "Discovery: Received unknown frame type 0x%02X from ID 0x%02X on network 0x%08X",
-                   pResponse->command, pResponse->tx_id, config.fan_networkId);
+                   pResponse->command, pResponse->tx_id, this->config_.fan_networkId);
           break;
       }
       break;
 
     case StateWaitQueryResponse:
-      if ((pResponse->rx_type == config.fan_my_device_type) &&  // If type
-          (pResponse->rx_id == config.fan_my_device_id)) {      // and id match, it is for us
+      if ((pResponse->rx_type == this->config_.fan_my_device_type) &&  // If type
+          (pResponse->rx_id == this->config_.fan_my_device_id)) {      // and id match, it is for us
         switch (pResponse->command) {
           case FAN_TYPE_FAN_SETTINGS:
             ESP_LOGD(TAG, "Received fan settings; speed: 0x%02X voltage: %i timer: %i",
@@ -366,8 +342,8 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
       break;
 
     case StateWaitSetSpeedResponse:
-      if ((pResponse->rx_type == config.fan_my_device_type) &&  // If type
-          (pResponse->rx_id == config.fan_my_device_id)) {      // and id match, it is for us
+      if ((pResponse->rx_type == this->config_.fan_my_device_type) &&  // If type
+          (pResponse->rx_id == this->config_.fan_my_device_id)) {      // and id match, it is for us
         switch (pResponse->command) {
           case FAN_TYPE_FAN_SETTINGS:
             ESP_LOGD(TAG, "Received fan settings; speed: 0x%02X voltage: %i timer: %i",
@@ -379,10 +355,10 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
 
             (void) memset(this->_txFrame, 0, FAN_FRAMESIZE);  // Clear frame data
 
-            pTxFrame->rx_type = config.fan_main_unit_type;  // Set type to main unit
-            pTxFrame->rx_id = config.fan_main_unit_id;      // Set ID to the ID of the main unit
-            pTxFrame->tx_type = config.fan_my_device_type;
-            pTxFrame->tx_id = config.fan_my_device_id;
+            pTxFrame->rx_type = this->config_.fan_main_unit_type;  // Set type to main unit
+            pTxFrame->rx_id = this->config_.fan_main_unit_id;      // Set ID to the ID of the main unit
+            pTxFrame->tx_type = this->config_.fan_my_device_type;
+            pTxFrame->tx_id = this->config_.fan_my_device_id;
             pTxFrame->ttl = FAN_TTL;
             pTxFrame->command = FAN_FRAME_SETSPEED_REPLY;  // 0x0B acknowledgee link successful
             pTxFrame->parameter_count = 0x03;              // 3 parameters
@@ -446,14 +422,16 @@ void ZehnderRF::queryDevice(void) {
 
   ESP_LOGD(TAG, "Query device");
 
+  this->lastFanQuery_ = millis();  // Update time
+
   // Clear frame data
   (void) memset(this->_txFrame, 0, FAN_FRAMESIZE);
 
   // Build frame
-  pFrame->rx_type = config.fan_main_unit_type;
-  pFrame->rx_id = config.fan_main_unit_id;
-  pFrame->tx_type = config.fan_my_device_type;
-  pFrame->tx_id = config.fan_my_device_id;
+  pFrame->rx_type = this->config_.fan_main_unit_type;
+  pFrame->rx_id = this->config_.fan_main_unit_id;
+  pFrame->tx_type = this->config_.fan_my_device_type;
+  pFrame->tx_id = this->config_.fan_my_device_id;
   pFrame->ttl = FAN_TTL;
   pFrame->command = FAN_TYPE_QUERY_DEVICE;
   pFrame->parameter_count = 0x00;  // No parameters
@@ -474,10 +452,10 @@ void ZehnderRF::setSpeed(const uint8_t speed, const uint8_t timer) {
   (void) memset(this->_txFrame, 0, FAN_FRAMESIZE);  // Clear frame data
 
   // Build frame
-  pFrame->rx_type = config.fan_main_unit_type;
-  pFrame->rx_id = config.fan_main_unit_id;
-  pFrame->tx_type = config.fan_my_device_type;
-  pFrame->tx_id = config.fan_my_device_id;
+  pFrame->rx_type = this->config_.fan_main_unit_type;
+  pFrame->rx_id = this->config_.fan_main_unit_id;
+  pFrame->tx_type = this->config_.fan_my_device_type;
+  pFrame->tx_id = this->config_.fan_my_device_id;
   pFrame->ttl = FAN_TTL;
 
   if (timer == 0) {
@@ -505,8 +483,8 @@ void ZehnderRF::discoveryStart(const uint8_t deviceId) {
 
   ESP_LOGD(TAG, "Start discovery with ID %u", deviceId);
 
-  config.fan_my_device_type = FAN_TYPE_REMOTE_CONTROL;
-  config.fan_my_device_id = deviceId;
+  this->config_.fan_my_device_type = FAN_TYPE_REMOTE_CONTROL;
+  this->config_.fan_my_device_id = deviceId;
 
   // Build frame
   (void) memset(this->_txFrame, 0, FAN_FRAMESIZE);  // Clear frame data
@@ -514,8 +492,8 @@ void ZehnderRF::discoveryStart(const uint8_t deviceId) {
   // Set payload, available for linking
   pFrame->rx_type = 0x04;
   pFrame->rx_id = 0x00;
-  pFrame->tx_type = config.fan_my_device_type;
-  pFrame->tx_id = config.fan_my_device_id;
+  pFrame->tx_type = this->config_.fan_my_device_type;
+  pFrame->tx_id = this->config_.fan_my_device_id;
   pFrame->ttl = FAN_TTL;
   pFrame->command = FAN_NETWORK_JOIN_ACK;
   pFrame->parameter_count = sizeof(RfPayloadNetworkJoinAck);
@@ -542,12 +520,12 @@ Result ZehnderRF::startTransmit(const uint8_t *const pData, const int8_t rxRetri
   unsigned long startTime;
   bool busy = true;
 
-  if (rfState != RfStateIdle) {
+  if (this->rfState_ != RfStateIdle) {
     ESP_LOGW(TAG, "TX still ongoing");
     result = ResultBusy;
   } else {
-    onReceiveTimeout = callback;
-    retries = rxRetries;
+    this->onReceiveTimeout_ = callback;
+    this->retries_ = rxRetries;
 
     // Write data to RF
     // if (pData != NULL) {  // If frame given, load it in the nRF. Else use previous TX payload
@@ -555,36 +533,36 @@ Result ZehnderRF::startTransmit(const uint8_t *const pData, const int8_t rxRetri
     this->rf_->writeTxPayload(pData, FAN_FRAMESIZE);  // Use framesize
     // }
 
-    rfState = RfStateWaitAirwayFree;
-    airwayFreeWaitTime = millis();
+    this->rfState_ = RfStateWaitAirwayFree;
+    this->airwayFreeWaitTime_ = millis();
   }
 
   return result;
 }
 
 void ZehnderRF::rfComplete(void) {
-  retries = -1;  // Disable retries
-  rfState = RfStateIdle;
+  this->retries_ = -1;  // Disable this->retries_
+  this->rfState_ = RfStateIdle;
 }
 
 void ZehnderRF::rfHandler(void) {
-  switch (rfState) {
+  switch (this->rfState_) {
     case RfStateIdle:
       break;
 
     case RfStateWaitAirwayFree:
-      if ((millis() - airwayFreeWaitTime) > 5000) {
+      if ((millis() - this->airwayFreeWaitTime_) > 5000) {
         ESP_LOGW(TAG, "Airway too busy, giving up");
-        rfState = RfStateIdle;
+        this->rfState_ = RfStateIdle;
 
-        if (onReceiveTimeout != NULL) {
-          onReceiveTimeout();
+        if (this->onReceiveTimeout_ != NULL) {
+          this->onReceiveTimeout_();
         }
       } else if (this->rf_->airwayBusy() == false) {
         ESP_LOGD(TAG, "Start TX");
         this->rf_->startTx(FAN_TX_FRAMES, nrf905::Receive);  // After transmit, wait for response
 
-        rfState = RfStateTxBusy;
+        this->rfState_ = RfStateTxBusy;
       }
       break;
 
@@ -592,25 +570,25 @@ void ZehnderRF::rfHandler(void) {
       break;
 
     case RfStateRxWait:
-      if ((retries >= 0) && ((millis() - msgSendTime) > FAN_REPLY_TIMEOUT)) {
+      if ((this->retries_ >= 0) && ((millis() - this->msgSendTime_) > FAN_REPLY_TIMEOUT)) {
         ESP_LOGD(TAG, "Receive timeout");
 
-        if (retries > 0) {
-          --retries;
-          ESP_LOGD(TAG, "No data received, retry again (left: %u)", retries);
+        if (this->retries_ > 0) {
+          --this->retries_;
+          ESP_LOGD(TAG, "No data received, retry again (left: %u)", this->retries_);
 
-          rfState = RfStateWaitAirwayFree;
-          airwayFreeWaitTime = millis();
-        } else if (retries == 0) {
+          this->rfState_ = RfStateWaitAirwayFree;
+          this->airwayFreeWaitTime_ = millis();
+        } else if (this->retries_ == 0) {
           // Oh oh, ran out of options
 
           ESP_LOGD(TAG, "No messages received, giving up now...");
-          if (onReceiveTimeout != NULL) {
-            onReceiveTimeout();
+          if (this->onReceiveTimeout_ != NULL) {
+            this->onReceiveTimeout_();
           }
 
           // Back to idle
-          rfState = RfStateIdle;
+          this->rfState_ = RfStateIdle;
         }
       }
       break;

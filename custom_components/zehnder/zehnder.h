@@ -56,21 +56,6 @@ enum {
 
 typedef enum { ResultOk, ResultBusy, ResultFailure } Result;
 
-typedef enum {
-  StateStartup,
-  StateStartDiscovery,
-  StateDiscoveryWaitForLinkRequest,
-  StateDiscoveryWaitForJoinResponse,
-  StateDiscoveryJoinComplete,
-
-  StateIdle,
-  StateWaitQueryResponse,
-  StateWaitSetSpeedResponse,
-  StateWaitSetSpeedConfirm,
-
-  StateNrOf  // Keep last
-} State;
-
 class ZehnderRF : public Component, public fan::Fan {
  public:
   ZehnderRF();
@@ -106,6 +91,20 @@ class ZehnderRF : public Component, public fan::Fan {
   void rfHandler(void);
   void rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength);
 
+  typedef enum {
+    StateStartup,
+    StateStartDiscovery,
+    StateDiscoveryWaitForLinkRequest,
+    StateDiscoveryWaitForJoinResponse,
+    StateDiscoveryJoinComplete,
+
+    StateIdle,
+    StateWaitQueryResponse,
+    StateWaitSetSpeedResponse,
+    StateWaitSetSpeedConfirm,
+
+    StateNrOf  // Keep last
+  } State;
   State state_{StateStartup};
   int speed_count_{};
 
@@ -115,6 +114,30 @@ class ZehnderRF : public Component, public fan::Fan {
   uint8_t _txFrame[FAN_FRAMESIZE];
 
   ESPPreferenceObject pref_;
+
+  typedef struct {
+    uint32_t fan_networkId;      // Fan (Zehnder/BUVA) network ID
+    uint8_t fan_my_device_type;  // Fan (Zehnder/BUVA) device type
+    uint8_t fan_my_device_id;    // Fan (Zehnder/BUVA) device ID
+    uint8_t fan_main_unit_type;  // Fan (Zehnder/BUVA) main unit type
+    uint8_t fan_main_unit_id;    // Fan (Zehnder/BUVA) main unit ID
+  } Config;
+  Config config_;
+
+  uint32_t lastFanQuery_{0};
+  std::function<void(void)> onReceiveTimeout_ = NULL;
+
+  uint32_t msgSendTime_{0};
+  uint32_t airwayFreeWaitTime_{0};
+  int8_t retries_{-1};
+
+  typedef enum {
+    RfStateIdle,            // Idle state
+    RfStateWaitAirwayFree,  // wait for airway free
+    RfStateTxBusy,          //
+    RfStateRxWait,
+  } RfState;
+  RfState rfState_{RfStateIdle};
 };
 
 }  // namespace zehnder
