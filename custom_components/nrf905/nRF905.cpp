@@ -161,6 +161,7 @@ void nRF905::setMode(const Mode mode) {
       break;
   }
 
+  // Enable TX
   switch (mode) {
     case Transmit:
       this->_gpio_pin_txen->digital_write(true);

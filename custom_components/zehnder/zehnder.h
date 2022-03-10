@@ -78,9 +78,10 @@ class ZehnderRF : public Component, public fan::Fan {
 
   float get_setup_priority() const override { return setup_priority::DATA; }
 
+  void setSpeed(const uint8_t speed, const uint8_t timer = 0);
+
  protected:
   void queryDevice(void);
-  void setSpeed(const uint8_t speed, const uint8_t timer = 0);
 
   uint8_t createDeviceID(void);
   void discoveryStart(const uint8_t deviceId);
@@ -130,6 +131,10 @@ class ZehnderRF : public Component, public fan::Fan {
   uint32_t msgSendTime_{0};
   uint32_t airwayFreeWaitTime_{0};
   int8_t retries_{-1};
+
+  uint8_t newSpeed{0};
+  uint8_t newTimer{0};
+  bool newSetting{false};
 
   typedef enum {
     RfStateIdle,            // Idle state

@@ -49,6 +49,22 @@ button:
     id: ${devicename}_esphome_restart
     name: ${upper_devicename} herstart
 
+  - platform: template
+    id: ${devicename}_high_10
+    name: ${upper_devicename} High 10
+    on_press:
+      then:
+        lambda: |-
+          zehnder_fan->setSpeed(3, 10);
+
+  - platform: template
+    id: ${devicename}_high_30
+    name: ${upper_devicename} High 30
+    on_press:
+      then:
+        lambda: |-
+          zehnder_fan->setSpeed(3, 30);
+
 # Load external components
 external_components:
   - source:
@@ -76,6 +92,7 @@ nrf905:
 # The FAN controller
 fan:
   - platform: zehnder
+    id: zehnder_fan
     name: "Ventilation"
     nrf905: nrf905_rf
     update_interval: "60s"

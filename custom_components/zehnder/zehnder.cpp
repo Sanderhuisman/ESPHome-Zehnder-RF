@@ -199,8 +199,12 @@ void ZehnderRF::loop(void) {
       break;
 
     case StateIdle:
-      if ((millis() - this->lastFanQuery_) > this->interval_) {
-        this->queryDevice();
+      if (newSetting == true) {
+        this->setSpeed(newSpeed, newTimer);
+      } else {
+        if ((millis() - this->lastFanQuery_) > this->interval_) {
+          this->queryDevice();
+        }
       }
       break;
 
@@ -476,37 +480,52 @@ void ZehnderRF::queryDevice(void) {
   this->state_ = StateWaitQueryResponse;
 }
 
-void ZehnderRF::setSpeed(const uint8_t speed, const uint8_t timer) {
+void ZehnderRF::setSpeed(const uint8_t paramSpeed, const uint8_t paramTimer) {
   RfFrame *const pFrame = (RfFrame *) this->_txFrame;  // frame helper
+  uint8_t speed = paramSpeed;
+  uint8_t timer = paramTimer;
 
-  ESP_LOGD(TAG, "Set speed: 0x%02X", speed);
-
-  (void) memset(this->_txFrame, 0, FAN_FRAMESIZE);  // Clear frame data
-
-  // Build frame
-  pFrame->rx_type = this->config_.fan_main_unit_type;
-  pFrame->rx_id = this->config_.fan_main_unit_id;
-  pFrame->tx_type = this->config_.fan_my_device_type;
-  pFrame->tx_id = this->config_.fan_my_device_id;
-  pFrame->ttl = FAN_TTL;
-
-  if (timer == 0) {
-    pFrame->command = FAN_FRAME_SETSPEED;
-    pFrame->parameter_count = sizeof(RfPayloadFanSetSpeed);
-    pFrame->payload.setSpeed.speed = speed;
-  } else {
-    pFrame->command = FAN_FRAME_SETTIMER;
-    pFrame->parameter_count = sizeof(RfPayloadFanSetTimer);
-    pFrame->payload.setTimer.speed = speed;
-    pFrame->payload.setTimer.timer = timer;
+  if (speed > this->speed_count_) {
+    ESP_LOGW(TAG, "Reguested speed too high (%u)", speed);
+    speed = this->speed_count_;
   }
 
-  this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]() {
-    ESP_LOGW(TAG, "Set speed timeout");
-    this->state_ = StateIdle;
-  });
+  ESP_LOGD(TAG, "Set speed: 0x%02X; Timer %u minutes", speed, timer);
 
-  this->state_ = StateWaitSetSpeedResponse;
+  if (this->state_ == StateIdle) {
+    (void) memset(this->_txFrame, 0, FAN_FRAMESIZE);  // Clear frame data
+
+    // Build frame
+    pFrame->rx_type = this->config_.fan_main_unit_type;
+    pFrame->rx_id = this->config_.fan_main_unit_id;
+    pFrame->tx_type = this->config_.fan_my_device_type;
+    pFrame->tx_id = this->config_.fan_my_device_id;
+    pFrame->ttl = FAN_TTL;
+
+    if (timer == 0) {
+      pFrame->command = FAN_FRAME_SETSPEED;
+      pFrame->parameter_count = sizeof(RfPayloadFanSetSpeed);
+      pFrame->payload.setSpeed.speed = speed;
+    } else {
+      pFrame->command = FAN_FRAME_SETTIMER;
+      pFrame->parameter_count = sizeof(RfPayloadFanSetTimer);
+      pFrame->payload.setTimer.speed = speed;
+      pFrame->payload.setTimer.timer = timer;
+    }
+
+    this->startTransmit(this->_txFrame, FAN_TX_RETRIES, [this]() {
+      ESP_LOGW(TAG, "Set speed timeout");
+      this->state_ = StateIdle;
+    });
+
+    newSetting = false;
+    this->state_ = StateWaitSetSpeedResponse;
+  } else {
+    ESP_LOGD(TAG, "Invalid state, I'm trying later again");
+    newSpeed = speed;
+    newTimer = timer;
+    newSetting = true;
+  }
 }
 
 void ZehnderRF::discoveryStart(const uint8_t deviceId) {
