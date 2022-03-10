@@ -139,7 +139,6 @@ class nRF905 : public Component,
 
   uint8_t readStatus(void);
 
-  bool testSpi(void);
   void spiTransfer(uint8_t *const data, const size_t length);
 
   char *hexArrayToStr(const uint8_t *const pData, const size_t dataLength);

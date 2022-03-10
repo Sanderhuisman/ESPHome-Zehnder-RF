@@ -88,18 +88,9 @@ void nRF905::dump_config() {
 }
 
 void nRF905::loop() {
-  static bool start = true;
   static uint8_t lastState = 0x00;
-
   static bool addrMatch;
   uint8_t buffer[NRF905_MAX_FRAMESIZE];
-
-  if ((start == true) && (millis() > 10000)) {
-    start = false;
-
-    // Test SPI
-    this->testSpi();
-  }
 
   uint8_t state = this->readStatus() & ((1 << NRF905_STATUS_DR) | (1 << NRF905_STATUS_AM));
   if (lastState != state) {
@@ -584,36 +575,6 @@ void nRF905::spiTransfer(uint8_t *const data, const size_t length) {
   this->transfer_array(data, length);
 
   this->disable();
-}
-
-bool nRF905::testSpi(void) {
-  uint32_t tx_address;
-  uint32_t addrRead;
-  bool result = true;
-
-  ESP_LOGD(TAG, "SPI Test");
-
-  this->readTxAddress(&tx_address);  // Backup current contents of transmit address register
-
-  this->writeTxAddress(0x55555555);  // Check if we can write a magic marker to the transmit address register
-  this->readTxAddress(&addrRead);
-  if (addrRead != 0x55555555)
-    result = false;
-
-  this->writeTxAddress(0xAAAAAAAA);  // Check if we can write a magic marker to the transmit address register
-  this->readTxAddress(&addrRead);
-  if (addrRead != 0xAAAAAAAA)
-    result = false;
-
-  this->writeTxAddress(tx_address);  // Restore transmit address register
-
-  if (result == true) {
-    ESP_LOGD(TAG, "SPI OK");
-  } else {
-    ESP_LOGE(TAG, "SPI failed");
-  }
-
-  return true;
 }
 
 char *nRF905::hexArrayToStr(const uint8_t *const pData, const size_t dataLength) {
