@@ -20,12 +20,12 @@ CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(nRF905Component),
-            cv.Required(CONF_AM_PIN): pins.gpio_input_pin_schema,
-            cv.Required(CONF_CD_PIN): pins.gpio_input_pin_schema,
+            cv.Optional(CONF_CD_PIN): pins.gpio_input_pin_schema,
             cv.Required(CONF_CE_PIN): pins.gpio_output_pin_schema,
-            cv.Required(CONF_DR_PIN): pins.gpio_input_pin_schema,
             cv.Required(CONF_PWR_PIN): pins.gpio_output_pin_schema,
             cv.Required(CONF_TXEN_PIN): pins.gpio_output_pin_schema,
+            cv.Optional(CONF_AM_PIN): pins.gpio_input_pin_schema,
+            cv.Optional(CONF_DR_PIN): pins.gpio_input_pin_schema,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -38,18 +38,17 @@ async def to_code(config):
     await cg.register_component(var, config)
     await spi.register_spi_device(var, config)
 
-    # await fan.register_fan(var, config)
-
-    # await cg.register_component(var, config)
-
-    data = await cg.gpio_pin_expression(config[CONF_AM_PIN])
-    cg.add(var.set_am_pin(data))
-    data = await cg.gpio_pin_expression(config[CONF_CD_PIN])
-    cg.add(var.set_cd_pin(data))
+    if CONF_AM_PIN in config:
+        data = await cg.gpio_pin_expression(config[CONF_AM_PIN])
+        cg.add(var.set_am_pin(data))
+    if CONF_CD_PIN in config:
+        data = await cg.gpio_pin_expression(config[CONF_CD_PIN])
+        cg.add(var.set_cd_pin(data))
     data = await cg.gpio_pin_expression(config[CONF_CE_PIN])
     cg.add(var.set_ce_pin(data))
-    data = await cg.gpio_pin_expression(config[CONF_DR_PIN])
-    cg.add(var.set_dr_pin(data))
+    if CONF_DR_PIN in config:
+        data = await cg.gpio_pin_expression(config[CONF_DR_PIN])
+        cg.add(var.set_dr_pin(data))
     data = await cg.gpio_pin_expression(config[CONF_PWR_PIN])
     cg.add(var.set_pwr_pin(data))
     data = await cg.gpio_pin_expression(config[CONF_TXEN_PIN])

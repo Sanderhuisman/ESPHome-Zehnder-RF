@@ -24,6 +24,7 @@ CONFIG_SCHEMA = fan.FAN_SCHEMA.extend(
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
     await fan.register_fan(var, config)
 
     nrf905 = await cg.get_variable(config[CONF_NRF905])

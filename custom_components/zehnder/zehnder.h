@@ -6,7 +6,6 @@
 #include "esphome/components/spi/spi.h"
 #include "esphome/components/fan/fan_state.h"
 #include "esphome/components/nrf905/nRF905.h"
-// #include "esphome/core/preferences.h"
 
 namespace esphome {
 namespace zehnder {
@@ -57,46 +56,27 @@ enum {
 
 typedef enum { ResultOk, ResultBusy, ResultFailure } Result;
 
-// struct ZehnderRFConfig {
-//   uint32_t nrf905_tx_address;  // nRF905 Tx address
-//   uint32_t fan_network_id;     // Fan (Zehnder/BUVA) network ID
-//   uint8_t fan_my_device_type;  // Fan (Zehnder/BUVA) device type
-//   uint8_t fan_my_device_id;    // Fan (Zehnder/BUVA) device ID
-//   uint8_t fan_main_unit_type;  // Fan (Zehnder/BUVA) main unit type
-//   uint8_t fan_main_unit_id;    // Fan (Zehnder/BUVA) main unit ID
-// } PACKED;
-
-typedef enum {
-  StateStartup,
-  StateStartDiscovery,
-  StateDiscoveryWaitForLinkRequest,
-  StateDiscoveryWaitForJoinResponse,
-  StateDiscoveryJoinComplete,
-
-  StateIdle,
-  StateWaitQueryResponse,
-  StateWaitSetSpeedResponse,
-  StateWaitSetSpeedConfirm,
-
-  StateNrOf  // Keep last
-} State;
-
-class ZehnderRF : public fan::FanState {
+class ZehnderRF : public Component, public fan::Fan {
  public:
   ZehnderRF();
 
   void setup() override;
 
-  void dump_config() override;
-  void loop() override;
-
-  int get_speed_count() { return 4; }
-
-  float get_setup_priority() const override { return setup_priority::DATA; }
-
+  // Setup things
   void set_rf(nrf905::nRF905 *const pRf) { rf_ = pRf; }
 
   void set_update_interval(const uint32_t interval) { interval_ = interval; }
+
+  void dump_config() override;
+
+  fan::FanTraits get_traits() override;
+  int get_speed_count() { return this->speed_count_; }
+
+  void loop() override;
+
+  void control(const fan::FanCall &call) override;
+
+  float get_setup_priority() const override { return setup_priority::DATA; }
 
  protected:
   void queryDevice(void);
@@ -111,16 +91,53 @@ class ZehnderRF : public fan::FanState {
   void rfHandler(void);
   void rfHandleReceived(const uint8_t *const pData, const uint8_t dataLength);
 
-  State state_{StateStartup};
+  typedef enum {
+    StateStartup,
+    StateStartDiscovery,
+    StateDiscoveryWaitForLinkRequest,
+    StateDiscoveryWaitForJoinResponse,
+    StateDiscoveryJoinComplete,
 
-  bool next_update_{true};
+    StateIdle,
+    StateWaitQueryResponse,
+    StateWaitSetSpeedResponse,
+    StateWaitSetSpeedConfirm,
+
+    StateNrOf  // Keep last
+  } State;
+  State state_{StateStartup};
+  int speed_count_{};
+
   nrf905::nRF905 *rf_;
   uint32_t interval_;
 
   uint8_t _txFrame[FAN_FRAMESIZE];
 
-  // ESPPreferenceObject pref_;
-  // ZehnderRFConfig config_;
+  ESPPreferenceObject pref_;
+
+  typedef struct {
+    uint32_t fan_networkId;      // Fan (Zehnder/BUVA) network ID
+    uint8_t fan_my_device_type;  // Fan (Zehnder/BUVA) device type
+    uint8_t fan_my_device_id;    // Fan (Zehnder/BUVA) device ID
+    uint8_t fan_main_unit_type;  // Fan (Zehnder/BUVA) main unit type
+    uint8_t fan_main_unit_id;    // Fan (Zehnder/BUVA) main unit ID
+  } Config;
+  Config config_;
+
+  uint32_t lastFanQuery_{0};
+  std::function<void(void)> onReceiveTimeout_ = NULL;
+
+  uint32_t msgSendTime_{0};
+  uint32_t airwayFreeWaitTime_{0};
+  int8_t retries_{-1};
+
+  typedef enum {
+    RfStateIdle,            // Idle state
+    RfStateWaitAirwayFree,  // wait for airway free
+    RfStateTxBusy,          //
+    RfStateRxWait,
+  } RfState;
+  RfState rfState_{RfStateIdle};
 };
 
 }  // namespace zehnder

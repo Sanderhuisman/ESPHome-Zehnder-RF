@@ -122,7 +122,6 @@ class nRF905 : public Component,
   void writeTxPayload(const uint8_t *const pData, const uint8_t dataLength, uint8_t *const pStatus = NULL);
   void readTxPayload(uint8_t *const pData, const uint8_t dataLength, uint8_t *const pStatus = NULL);
 
-  bool receiveBusy();
   bool airwayBusy(void);
 
   void startTx(const uint32_t retransmit, const Mode nextMode);
@@ -139,10 +138,11 @@ class nRF905 : public Component,
   void encodeConfigRegisters(const Config *const pConfig, ConfigBuffer *const pBuffer);
 
   uint8_t readStatus(void);
-  bool addressMatched(void);
 
   bool testSpi(void);
   void spiTransfer(uint8_t *const data, const size_t length);
+
+  char *hexArrayToStr(const uint8_t *const pData, const size_t dataLength);
 
   RxCompleteCallback onRxComplete{NULL};
 
