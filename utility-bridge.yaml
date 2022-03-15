@@ -19,6 +19,15 @@ logger:
 api:
   password: !secret esphome_utility_bridge_api_password
 
+  services:
+    - service: set_speed
+      variables:
+        run_speed: int
+        run_time: int
+      then:
+        - lambda: |-
+            zehnder_fan->setSpeed(run_speed, run_time);
+
 ota:
   password: !secret esphome_utility_bridge_ota_password
 

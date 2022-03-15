@@ -296,7 +296,7 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
             pTxFrame->tx_type = this->config_.fan_my_device_type;
             pTxFrame->tx_id = this->config_.fan_my_device_id;
             pTxFrame->ttl = FAN_TTL;
-            pTxFrame->command = FAN_FRAME_0B;  // 0x0B acknowledgee link successful
+            pTxFrame->command = FAN_FRAME_0B;  // 0x0B acknowledge link successful
             pTxFrame->parameter_count = 0x00;  // No parameters
 
             // Send response frame
@@ -307,7 +307,7 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
 
             this->state_ = StateDiscoveryJoinComplete;
           } else {
-            ESP_LOGE(TAG, "Discovery: Received unknown link succes from ID 0x%02X on network 0x%08X", pResponse->tx_id,
+            ESP_LOGE(TAG, "Discovery: Received unknown link success from ID 0x%02X on network 0x%08X", pResponse->tx_id,
                      this->config_.fan_networkId);
           }
           break;
@@ -396,7 +396,7 @@ void ZehnderRF::rfHandleReceived(const uint8_t *const pData, const uint8_t dataL
             pTxFrame->tx_type = this->config_.fan_my_device_type;
             pTxFrame->tx_id = this->config_.fan_my_device_id;
             pTxFrame->ttl = FAN_TTL;
-            pTxFrame->command = FAN_FRAME_SETSPEED_REPLY;  // 0x0B acknowledgee link successful
+            pTxFrame->command = FAN_FRAME_SETSPEED_REPLY;  // 0x0B acknowledge link successful
             pTxFrame->parameter_count = 0x03;              // 3 parameters
             pTxFrame->payload.parameters[0] = 0x54;
             pTxFrame->payload.parameters[1] = 0x03;
@@ -486,7 +486,7 @@ void ZehnderRF::setSpeed(const uint8_t paramSpeed, const uint8_t paramTimer) {
   uint8_t timer = paramTimer;
 
   if (speed > this->speed_count_) {
-    ESP_LOGW(TAG, "Reguested speed too high (%u)", speed);
+    ESP_LOGW(TAG, "Requested speed too high (%u)", speed);
     speed = this->speed_count_;
   }
 
