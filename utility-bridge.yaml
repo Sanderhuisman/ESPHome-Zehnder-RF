@@ -77,8 +77,7 @@ button:
 # Load external components
 # https://esphome.io/components/external_components.html#external-components-git
 external_components:
-  - source:
-      type: github://Sanderhuisman/ESPHome-Zehnder-RF
+  - source: github://Sanderhuisman/ESPHome-Zehnder-RF
 
 # SPI
 spi:
