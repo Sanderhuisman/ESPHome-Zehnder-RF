@@ -75,10 +75,10 @@ button:
           zehnder_fan->setSpeed(3, 30);
 
 # Load external components
+# https://esphome.io/components/external_components.html#external-components-git
 external_components:
   - source:
-      type: local
-      path: custom_components
+      type: github://Sanderhuisman/ESPHome-Zehnder-RF
 
 # SPI
 spi:
